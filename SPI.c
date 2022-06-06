@@ -1,8 +1,13 @@
+#include <stdint.h>
+
 #include "SPI.h"
 #include "UART.h"
 #include "FreeRTOS.h"
 #include "FreeRTOSConfig.h"
 #include "portable.h"
+#include "semphr.h"
+#include "System.h"
+#include "TTerm.h"
 
 #define SPICON handle->CON->w
 #define SPICONbits (*handle->CON)
@@ -11,6 +16,8 @@
 #define SPIBRG (*handle->BRG)
 #define SPISTAT *handle->STAT
 #define SPIBUF *handle->BUF
+
+const uint8_t SPI_dummyData[SPI_maxDummybufferSize] = {[0 ... (SPI_maxDummybufferSize-1)] = 0xff};
 
 SPI_HANDLE * SPI_createHandle(uint8_t module){
     SPI_HANDLE * ret = 0;
@@ -25,6 +32,10 @@ SPI_HANDLE * SPI_createHandle(uint8_t module){
             ret->BUF = &SPI1BUF;
             ret->pinVal = 0b0101;
             ret->SDIR = &SDI1R;
+    
+            ret->rxIRQ = _SPI1_RX_VECTOR;
+            ret->txIRQ = _SPI1_TX_VECTOR;
+            ret->fltIRQ = _SPI1_FAULT_VECTOR;
             return ret;
 #endif
             
@@ -38,6 +49,10 @@ SPI_HANDLE * SPI_createHandle(uint8_t module){
             ret->BUF = &SPI2BUF;
             ret->pinVal = 0b0110;
             ret->SDIR = &SDI2R;
+    
+            ret->rxIRQ = _SPI2_RX_VECTOR;
+            ret->txIRQ = _SPI2_TX_VECTOR;
+            ret->fltIRQ = _SPI2_FAULT_VECTOR;
             return ret;
 #endif
             
@@ -51,6 +66,10 @@ SPI_HANDLE * SPI_createHandle(uint8_t module){
             ret->BUF = &SPI3BUF;
             ret->pinVal = 0b0111;
             ret->SDIR = &SDI3R;
+    
+            ret->rxIRQ = _SPI3_RX_VECTOR;
+            ret->txIRQ = _SPI3_TX_VECTOR;
+            ret->fltIRQ = _SPI3_FAULT_VECTOR;
             return ret;
 #endif
             
@@ -64,6 +83,10 @@ SPI_HANDLE * SPI_createHandle(uint8_t module){
             ret->BUF = &SPI4BUF;
             ret->pinVal = 0b1000;
             ret->SDIR = &SDI4R;
+    
+            ret->rxIRQ = _SPI4_RX_VECTOR;
+            ret->txIRQ = _SPI4_TX_VECTOR;
+            ret->fltIRQ = _SPI4_FAULT_VECTOR;
             return ret;
 #endif
             
@@ -77,6 +100,10 @@ SPI_HANDLE * SPI_createHandle(uint8_t module){
             ret->BUF = &SPI5BUF;
             ret->pinVal = 0b1001;
             ret->SDIR = &SDI5R;
+    
+            ret->rxIRQ = _SPI5_RX_VECTOR;
+            ret->txIRQ = _SPI5_TX_VECTOR;
+            ret->fltIRQ = _SPI5_FAULT_VECTOR;
             return ret;
 #endif
             
@@ -90,6 +117,10 @@ SPI_HANDLE * SPI_createHandle(uint8_t module){
             ret->BUF = &SPI6BUF;
             ret->pinVal = 0b1010;
             ret->SDIR = &SDI6R;
+    
+            ret->rxIRQ = _SPI6_RX_VECTOR;
+            ret->txIRQ = _SPI6_TX_VECTOR;
+            ret->fltIRQ = _SPI6_FAULT_VECTOR;
             return ret;
 #endif
     }
@@ -102,6 +133,11 @@ void SPI_init(SPI_HANDLE * handle, volatile uint32_t* SDOPin, uint8_t SDIPin, ui
     SPICONbits.MCLKSEL = 0;
     SPICONbits.ENHBUF = 0;
     SPICONbits.SIDL = 0;
+    SPICONbits.MODE16 = 0;
+    SPICONbits.MODE32 = 0;
+    
+    handle->semaphore = xSemaphoreCreateBinary();
+    xSemaphoreGive(handle->semaphore);
     
     SPICONbits.DISSDI = 0; //all data pins active, CS controlled seperately
     SPICONbits.DISSDO = 0;
@@ -152,6 +188,58 @@ void SPI_init(SPI_HANDLE * handle, volatile uint32_t* SDOPin, uint8_t SDIPin, ui
     SPIBRG = (configPERIPHERAL_CLOCK_HZ/(2*clkFreq)) - 1;
 }
 
+static void SPI_DMAISR(uint32_t evt, void * data){
+    SPI_HANDLE * handle = (SPI_HANDLE *) data;
+    
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    
+        /* Unblock the task by releasing the semaphore. */
+    xSemaphoreGiveFromISR(handle->semaphore, &xHigherPriorityTaskWoken);
+}
+
+uint32_t SPI_setDMAEnabled(SPI_HANDLE * handle, uint32_t ena){
+    //do we need to change anything?
+    if(ena && (handle->rxDMA != NULL)) return 1;
+    if(!ena && (handle->rxDMA == NULL)) return 1;
+    
+    //aquire SPI semaphore
+    if(ena){
+        //aquire two dma channels
+        handle->rxDMA = DMA_allocateChannel();
+        handle->txDMA = DMA_allocateChannel();
+
+        //configure SPI module IRQs (tx when at least one item can be written, rx when at least one can be read)
+        SPI_setIRQConfig(handle, 0b11, 0b01);
+        SPI_setBufferConfig(handle, 1);
+
+        //rx dma setup, transfer one byte every rx isr
+        DMA_setChannelAttributes(handle->rxDMA, 0, 0, 0, 0, 3);
+        DMA_setSrcConfig(handle->rxDMA, handle->BUF, 1);
+        DMA_setTransferAttributes(handle->rxDMA, 1, handle->rxIRQ, -1);
+
+        DMA_setChannelAttributes(handle->txDMA, 0, 0, 0, 0, 2);
+        DMA_setDestConfig(handle->txDMA, handle->BUF, 1);
+        DMA_setTransferAttributes(handle->txDMA, 1, handle->txIRQ, -1);
+    }else{
+        DMA_freeChannel(handle->rxDMA);
+        DMA_freeChannel(handle->txDMA);
+        handle->rxDMA = NULL;
+        handle->txDMA = NULL;
+        SPI_setIRQConfig(handle, 0, 0);
+        SPI_setBufferConfig(handle, 0);
+    }
+}
+
+void SPI_setBufferConfig(SPI_HANDLE * handle, uint32_t eBufferEna){
+    SPICONbits.ENHBUF = eBufferEna;
+}
+
+void SPI_setIRQConfig(SPI_HANDLE * handle, uint32_t txIRQMode, uint32_t rxIRQMode){
+    SPICON &= ~(_SPI1CON_STXISEL_MASK | _SPI1CON_SRXISEL_MASK);
+    SPICON |= txIRQMode << _SPI1CON_STXISEL_POSITION;
+    SPICON |= rxIRQMode << _SPI1CON_SRXISEL_POSITION;
+}
+
 uint8_t SPI_send(SPI_HANDLE * handle, uint8_t data){
     SPIBUF = data;
 
@@ -160,12 +248,88 @@ uint8_t SPI_send(SPI_HANDLE * handle, uint8_t data){
     return ret;
 }
 
-void SPI_sendBytes(SPI_HANDLE * handle, uint8_t * data, uint8_t length, unsigned WE){
-    uint16_t i = 0;
-    for(;i < length; i++){
-        uint8_t trash = SPI_send(handle, data[i]);
-        if(WE) data[i] = trash;
+void SPI_flush(SPI_HANDLE * handle){
+    while(!(SPISTAT & _SPI1STAT_SPIRBE_MASK));
+}
+
+void SPI_continueDMARead(SPI_HANDLE * handle, uint8_t * data, uint32_t length, unsigned WE, unsigned dummyEnable){
+    
+    //reset pointers and irq sources
+    DMA_abortTransfer(handle->rxDMA);
+    DMA_abortTransfer(handle->txDMA);
+    
+    DMA_setDestConfig(handle->rxDMA, data, length);
+    DMA_setSrcConfig(handle->txDMA, dummyEnable ? SPI_dummyData : data, length);
+    
+    SPI_flush(handle);
+    
+    DMA_setInterruptConfig(handle->rxDMA, 0, 0, 0, 0, WE, 0, 1, 1);
+    DMA_setInterruptConfig(handle->txDMA, 0, 0, 0, 0, !WE, 0, 1, 1);
+    DMA_clearIF(handle->rxDMA, DMA_ALL_IF);
+    DMA_clearIF(handle->txDMA, DMA_ALL_IF);
+    DMA_clearGloablIF(handle->rxDMA);
+    DMA_clearGloablIF(handle->txDMA);
+    
+    //arm rx channel if reading is desired
+    DMA_setEnabled(handle->rxDMA, WE);
+
+    //start transfer (tx isr is active as long as we can write something)
+    DMA_setEnabled(handle->txDMA, 1);
+}
+
+void SPI_sendBytes(SPI_HANDLE * handle, uint8_t * data, uint32_t length, unsigned WE, unsigned dummyEnable, DMAIRQHandler_t customIRQHandlerFunction, void * customIRQHandlerData){
+    //if(!xSemaphoreTake(handle->semaphore, 1000)) return 0;
+    //will we use DMA for the transfer?
+    
+    if(handle->rxDMA != NULL){
+        //software breakpoint, incase the data is in cacheable ram
+        configASSERT(SYS_isInKSEG1RAM(data));
+        
+        //reset pointers and irq sources
+        DMA_abortTransfer(handle->rxDMA);
+        DMA_abortTransfer(handle->txDMA);
+        
+        DMA_setDestConfig(handle->rxDMA, data, length);
+        DMA_setSrcConfig(handle->txDMA, dummyEnable ? SPI_dummyData : data, length);
+        
+        SPI_flush(handle);
+        
+        //TODO ignore receiver overflow in tx mode
+        
+        if(WE){
+            DMA_setIRQHandler(handle->rxDMA, (customIRQHandlerFunction == NULL) ? SPI_DMAISR : customIRQHandlerFunction, (customIRQHandlerData == NULL) ? handle : customIRQHandlerData);
+            DMA_setIRQHandler(handle->txDMA, NULL, NULL);
+        }else{
+            DMA_setIRQHandler(handle->rxDMA, NULL, NULL);
+            DMA_setIRQHandler(handle->txDMA, (customIRQHandlerFunction == NULL) ? SPI_DMAISR : customIRQHandlerFunction, (customIRQHandlerData == NULL) ? handle : customIRQHandlerData);
+        }
+        DMA_setInterruptConfig(handle->rxDMA, 0, 0, 0, 0, WE, 0, 1, 1);
+        DMA_setInterruptConfig(handle->txDMA, 0, 0, 0, 0, !WE, 0, 1, 1);
+        
+        DMA_clearIF(handle->rxDMA, DMA_ALL_IF);
+        DMA_clearIF(handle->txDMA, DMA_ALL_IF);
+        DMA_clearGloablIF(handle->rxDMA);
+        DMA_clearGloablIF(handle->txDMA);
+        
+        //arm rx channel if reading is desired
+        DMA_setEnabled(handle->rxDMA, WE);
+        
+        //start transfer (tx isr is active as long as we can write something)
+        DMA_setEnabled(handle->txDMA, 1);
+        
+        if(!customIRQHandlerFunction){
+            if(!xSemaphoreTake(handle->semaphore, 1000)){ 
+                xSemaphoreGive(handle->semaphore);
+                return;
+            }
+        }
+    }else{
+        for(uint32_t i = 0;i < length; i++){
+            uint8_t trash = SPI_send(handle, dummyEnable ? 0xff : data[i]);
+            if(WE) data[i] = trash;
+        }
     }
+    //xSemaphoreGive(handle->semaphore);
 }
 
 void SPI_readBytes(SPI_HANDLE * handle, uint8_t * data, uint16_t length){
@@ -174,6 +338,7 @@ void SPI_readBytes(SPI_HANDLE * handle, uint8_t * data, uint16_t length){
 }
 
 void SPI_setCLKFreq(SPI_HANDLE * handle, uint32_t freq){
+    if(freq > configPERIPHERAL_CLOCK_HZ/2) freq = configPERIPHERAL_CLOCK_HZ/2;
     SPIBRG = (configPERIPHERAL_CLOCK_HZ/(2*freq)) - 1;
 }
 

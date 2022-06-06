@@ -1,8 +1,15 @@
 #include <xc.h>
 #include <stdint.h>
 
+
 #ifndef SPI
 #define SPI
+
+#include "FreeRTOS.h"
+#include "semphr.h"
+#include "DMA.h"
+
+#define SPI_maxDummybufferSize 2048
 
 typedef union {
   struct {
@@ -91,13 +98,27 @@ typedef struct{
     volatile uint32_t * BUF;
     volatile uint32_t * STAT;
     volatile uint32_t * SDIR;
-    volatile uint8_t pinVal;
+    volatile uint8_t    pinVal;
+    
+    SemaphoreHandle_t   semaphore;
+    
+    uint32_t            rxIRQ;
+    uint32_t            txIRQ;
+    uint32_t            fltIRQ;
+    
+    DMA_HANDLE_t      * txDMA;
+    DMA_HANDLE_t      * rxDMA;
 } SPI_HANDLE;
 
 SPI_HANDLE * SPI_createHandle(uint8_t module);
 void SPI_init(SPI_HANDLE * handle, volatile uint32_t* SDOPin, uint8_t SDIPin, uint8_t spiMode, uint32_t clkFreq);
+uint32_t SPI_setDMAEnabled(SPI_HANDLE * handle, uint32_t ena);
+void SPI_setBufferConfig(SPI_HANDLE * handle, uint32_t eBufferEna);
+void SPI_setIRQConfig(SPI_HANDLE * handle, uint32_t txIRQMode, uint32_t rxIRQMode);
 uint8_t SPI_send(SPI_HANDLE * handle, uint8_t data);
-void SPI_sendBytes(SPI_HANDLE * handle, uint8_t * data, uint8_t length, unsigned WE);
+void SPI_continueDMARead(SPI_HANDLE * handle, uint8_t * data, uint32_t length, unsigned WE, unsigned dummyEnable);
+void SPI_flush(SPI_HANDLE * handle);
+void SPI_sendBytes(SPI_HANDLE * handle, uint8_t * data, uint32_t length, unsigned WE, unsigned dummyEnable, DMAIRQHandler_t customIRQHandlerFunction, void * customIRQHandlerData);
 void SPI_readBytes(SPI_HANDLE * handle, uint8_t * data, uint16_t length);
 void SPI_setCLKFreq(SPI_HANDLE * handle, uint32_t freq);
 void SPI_setCLKDiv(SPI_HANDLE * handle, uint32_t div);
