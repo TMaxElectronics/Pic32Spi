@@ -2,8 +2,8 @@
 #include <stdint.h>
 
 
-#ifndef SPI
-#define SPI
+#ifndef SPI_INC
+#define SPI_INC
 
 #include "FreeRTOS.h"
 #include "semphr.h"
@@ -111,6 +111,7 @@ typedef struct{
 } SPI_HANDLE;
 
 SPI_HANDLE * SPI_createHandle(uint8_t module);
+void SPI_setCustomPinConfig(SPI_HANDLE * handle, uint32_t SDIEnabled, uint32_t SDOEnabled);
 void SPI_init(SPI_HANDLE * handle, volatile uint32_t* SDOPin, uint8_t SDIPin, uint8_t spiMode, uint32_t clkFreq);
 uint32_t SPI_setDMAEnabled(SPI_HANDLE * handle, uint32_t ena);
 void SPI_setBufferConfig(SPI_HANDLE * handle, uint32_t eBufferEna);

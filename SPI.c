@@ -33,9 +33,9 @@ SPI_HANDLE * SPI_createHandle(uint8_t module){
             ret->pinVal = 0b0101;
             ret->SDIR = &SDI1R;
     
-            ret->rxIRQ = _SPI1_RX_VECTOR;
-            ret->txIRQ = _SPI1_TX_VECTOR;
-            ret->fltIRQ = _SPI1_FAULT_VECTOR;
+            ret->rxIRQ = _SPI1_RX_IRQ;
+            ret->txIRQ = _SPI1_TX_IRQ;
+            ret->fltIRQ = _SPI1_ERR_IRQ;
             return ret;
 #endif
             
@@ -50,9 +50,9 @@ SPI_HANDLE * SPI_createHandle(uint8_t module){
             ret->pinVal = 0b0110;
             ret->SDIR = &SDI2R;
     
-            ret->rxIRQ = _SPI2_RX_VECTOR;
-            ret->txIRQ = _SPI2_TX_VECTOR;
-            ret->fltIRQ = _SPI2_FAULT_VECTOR;
+            ret->rxIRQ = _SPI2_RX_IRQ;
+            ret->txIRQ = _SPI2_TX_IRQ;
+            ret->fltIRQ = _SPI2_ERR_IRQ;
             return ret;
 #endif
             
@@ -125,6 +125,11 @@ SPI_HANDLE * SPI_createHandle(uint8_t module){
 #endif
     }
     return 0;
+}
+
+void SPI_setCustomPinConfig(SPI_HANDLE * handle, uint32_t SDIEnabled, uint32_t SDOEnabled){
+    SPICONbits.DISSDI = SDIEnabled;
+    SPICONbits.DISSDO = SDOEnabled;
 }
 
 void SPI_init(SPI_HANDLE * handle, volatile uint32_t* SDOPin, uint8_t SDIPin, uint8_t spiMode, uint32_t clkFreq){
@@ -282,8 +287,6 @@ void SPI_sendBytes(SPI_HANDLE * handle, uint8_t * data, uint32_t length, unsigne
     //will we use DMA for the transfer?
     
     if(handle->rxDMA != NULL){
-        //software breakpoint, incase the data is in cacheable ram
-        configASSERT(SYS_isInKSEG1RAM(data));
         
         //reset pointers and irq sources
         DMA_abortTransfer(handle->rxDMA);
