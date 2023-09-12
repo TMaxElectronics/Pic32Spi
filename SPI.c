@@ -30,7 +30,7 @@ SPI_HANDLE * SPI_createHandle(uint8_t module){
             ret->STAT = &SPI1STAT;
             ret->BRG = &SPI1BRG;
             ret->BUF = &SPI1BUF;
-            ret->pinVal = 0b0101;
+            ret->pinVal = 0b0011;
             ret->SDIR = &SDI1R;
     
             ret->rxIRQ = _SPI1_RX_IRQ;
@@ -128,8 +128,8 @@ SPI_HANDLE * SPI_createHandle(uint8_t module){
 }
 
 void SPI_setCustomPinConfig(SPI_HANDLE * handle, uint32_t SDIEnabled, uint32_t SDOEnabled){
-    SPICONbits.DISSDI = SDIEnabled;
-    SPICONbits.DISSDO = SDOEnabled;
+    SPICONbits.DISSDI = !SDIEnabled;
+    SPICONbits.DISSDO = !SDOEnabled;
 }
 
 void SPI_init(SPI_HANDLE * handle, volatile uint32_t* SDOPin, uint8_t SDIPin, uint8_t spiMode, uint32_t clkFreq){
@@ -204,27 +204,32 @@ static void SPI_DMAISR(uint32_t evt, void * data){
 
 uint32_t SPI_setDMAEnabled(SPI_HANDLE * handle, uint32_t ena){
     //do we need to change anything?
-    if(ena && (handle->rxDMA != NULL)) return 1;
-    if(!ena && (handle->rxDMA == NULL)) return 1;
+    if(ena && handle->dmaEnabled) return 1;
+    if(!ena && !handle->dmaEnabled) return 1;
     
     //aquire SPI semaphore
     if(ena){
         //aquire two dma channels
-        handle->rxDMA = DMA_allocateChannel();
-        handle->txDMA = DMA_allocateChannel();
+        //do we need RX DMA?
+        if(!SPICONbits.DISSDI) handle->rxDMA = DMA_allocateChannel();
+        if(!SPICONbits.DISSDO) handle->txDMA = DMA_allocateChannel();
 
         //configure SPI module IRQs (tx when at least one item can be written, rx when at least one can be read)
-        SPI_setIRQConfig(handle, 0b11, 0b01);
         SPI_setBufferConfig(handle, 1);
+        SPI_setIRQConfig(handle, (handle->txDMA != 0) ? 0b11 : 0, (handle->rxDMA != NULL) ? 0b01 : 0);
 
-        //rx dma setup, transfer one byte every rx isr
-        DMA_setChannelAttributes(handle->rxDMA, 0, 0, 0, 0, 3);
-        DMA_setSrcConfig(handle->rxDMA, handle->BUF, 1);
-        DMA_setTransferAttributes(handle->rxDMA, 1, handle->rxIRQ, -1);
+        if(handle->rxDMA != 0){
+            //rx dma setup, transfer one byte every rx isr
+            DMA_setChannelAttributes(handle->rxDMA, 0, 0, 0, 0, 3);
+            DMA_setSrcConfig(handle->rxDMA, handle->BUF, 1);
+            DMA_setTransferAttributes(handle->rxDMA, 1, handle->rxIRQ, -1);
+        }
 
-        DMA_setChannelAttributes(handle->txDMA, 0, 0, 0, 0, 2);
-        DMA_setDestConfig(handle->txDMA, handle->BUF, 1);
-        DMA_setTransferAttributes(handle->txDMA, 1, handle->txIRQ, -1);
+        if(handle->txDMA != 0){
+            DMA_setChannelAttributes(handle->txDMA, 0, 0, 0, 0, 2);
+            DMA_setDestConfig(handle->txDMA, handle->BUF, 1);
+            DMA_setTransferAttributes(handle->txDMA, 1, handle->txIRQ, -1);
+        }
     }else{
         DMA_freeChannel(handle->rxDMA);
         DMA_freeChannel(handle->txDMA);
@@ -233,6 +238,8 @@ uint32_t SPI_setDMAEnabled(SPI_HANDLE * handle, uint32_t ena){
         SPI_setIRQConfig(handle, 0, 0);
         SPI_setBufferConfig(handle, 0);
     }
+    
+    handle->dmaEnabled = ena;
 }
 
 void SPI_setBufferConfig(SPI_HANDLE * handle, uint32_t eBufferEna){
@@ -286,13 +293,15 @@ void SPI_sendBytes(SPI_HANDLE * handle, uint8_t * data, uint32_t length, unsigne
     //if(!xSemaphoreTake(handle->semaphore, 1000)) return 0;
     //will we use DMA for the transfer?
     
-    if(handle->rxDMA != NULL){
+    if(handle->dmaEnabled){
+        //no point in running a send operation if there is no send dma TODO: evaluate this... might still be useful in some circumstance
+        if(handle->txDMA == NULL) return;
         
         //reset pointers and irq sources
-        DMA_abortTransfer(handle->rxDMA);
-        DMA_abortTransfer(handle->txDMA);
+        if(handle->rxDMA != NULL) DMA_abortTransfer(handle->rxDMA);
+        if(handle->txDMA != NULL) DMA_abortTransfer(handle->txDMA);
         
-        DMA_setDestConfig(handle->rxDMA, data, length);
+        if(handle->rxDMA != NULL) DMA_setDestConfig(handle->rxDMA, data, length);
         DMA_setSrcConfig(handle->txDMA, dummyEnable ? SPI_dummyData : data, length);
         
         SPI_flush(handle);
@@ -306,16 +315,17 @@ void SPI_sendBytes(SPI_HANDLE * handle, uint8_t * data, uint32_t length, unsigne
             DMA_setIRQHandler(handle->rxDMA, NULL, NULL);
             DMA_setIRQHandler(handle->txDMA, (customIRQHandlerFunction == NULL) ? SPI_DMAISR : customIRQHandlerFunction, (customIRQHandlerData == NULL) ? handle : customIRQHandlerData);
         }
+        
         DMA_setInterruptConfig(handle->rxDMA, 0, 0, 0, 0, WE, 0, 1, 1);
         DMA_setInterruptConfig(handle->txDMA, 0, 0, 0, 0, !WE, 0, 1, 1);
         
-        DMA_clearIF(handle->rxDMA, DMA_ALL_IF);
+        if(handle->rxDMA != NULL) DMA_clearIF(handle->rxDMA, DMA_ALL_IF);
         DMA_clearIF(handle->txDMA, DMA_ALL_IF);
-        DMA_clearGloablIF(handle->rxDMA);
+        if(handle->rxDMA != NULL) DMA_clearGloablIF(handle->rxDMA);
         DMA_clearGloablIF(handle->txDMA);
         
         //arm rx channel if reading is desired
-        DMA_setEnabled(handle->rxDMA, WE);
+        if(handle->rxDMA != NULL) DMA_setEnabled(handle->rxDMA, WE);
         
         //start transfer (tx isr is active as long as we can write something)
         DMA_setEnabled(handle->txDMA, 1);
@@ -326,6 +336,8 @@ void SPI_sendBytes(SPI_HANDLE * handle, uint8_t * data, uint32_t length, unsigne
                 return;
             }
         }
+        //wait for the buffer to be emptied
+        while(SPISTAT & _SPI2STAT_SPIBUSY_MASK);
     }else{
         for(uint32_t i = 0;i < length; i++){
             uint8_t trash = SPI_send(handle, dummyEnable ? 0xff : data[i]);

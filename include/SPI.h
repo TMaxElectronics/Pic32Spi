@@ -108,6 +108,7 @@ typedef struct{
     
     DMA_HANDLE_t      * txDMA;
     DMA_HANDLE_t      * rxDMA;
+    uint32_t            dmaEnabled;
 } SPI_HANDLE;
 
 SPI_HANDLE * SPI_createHandle(uint8_t module);
