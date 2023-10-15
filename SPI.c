@@ -47,7 +47,7 @@ SPI_HANDLE * SPI_createHandle(uint8_t module){
             ret->STAT = &SPI2STAT;
             ret->BRG = &SPI2BRG;
             ret->BUF = &SPI2BUF;
-            ret->pinVal = 0b0110;
+            ret->pinVal = 0b0100;
             ret->SDIR = &SDI2R;
     
             ret->rxIRQ = _SPI2_RX_IRQ;
