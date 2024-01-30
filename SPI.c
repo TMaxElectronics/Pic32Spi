@@ -19,12 +19,12 @@
 
 const uint8_t SPI_dummyData[SPI_maxDummybufferSize] = {[0 ... (SPI_maxDummybufferSize-1)] = 0xff};
 
-SPI_HANDLE * SPI_createHandle(uint8_t module){
-    SPI_HANDLE * ret = 0;
+SPIHandle_t * SPI_createHandle(uint8_t module){
+    SPIHandle_t * ret = 0;
     switch(module){
 #ifdef SPI1CON
         case 1:
-            ret = pvPortMalloc(sizeof(SPI_HANDLE));
+            ret = pvPortMalloc(sizeof(SPIHandle_t));
             ret->CON = (CONBITS_t *) &SPI1CON;
             ret->CON2 = (CON2BITS_t *) &SPI1CON2;
             ret->STAT = &SPI1STAT;
@@ -41,7 +41,7 @@ SPI_HANDLE * SPI_createHandle(uint8_t module){
             
 #ifdef SPI2CON
         case 2:
-            ret = pvPortMalloc(sizeof(SPI_HANDLE));
+            ret = pvPortMalloc(sizeof(SPIHandle_t));
             ret->CON = (CONBITS_t *) &SPI2CON;
             ret->CON2 = (CON2BITS_t *) &SPI2CON2;
             ret->STAT = &SPI2STAT;
@@ -58,7 +58,7 @@ SPI_HANDLE * SPI_createHandle(uint8_t module){
             
 #ifdef SPI3CON
         case 3:
-            ret = pvPortMalloc(sizeof(SPI_HANDLE));
+            ret = pvPortMalloc(sizeof(SPIHandle_t));
             ret->CON = (CONBITS_t *) &SPI3CON;
             ret->CON2 = (CON2BITS_t *) &SPI3CON2;
             ret->STAT = &SPI3STAT;
@@ -75,7 +75,7 @@ SPI_HANDLE * SPI_createHandle(uint8_t module){
             
 #ifdef SPI4CON
         case 4:
-            ret = pvPortMalloc(sizeof(SPI_HANDLE));
+            ret = pvPortMalloc(sizeof(SPIHandle_t));
             ret->CON = (CONBITS_t *) &SPI4CON;
             ret->CON2 = (CON2BITS_t *) &SPI4CON2;
             ret->STAT = &SPI4STAT;
@@ -92,7 +92,7 @@ SPI_HANDLE * SPI_createHandle(uint8_t module){
             
 #ifdef SPI5CON
         case 5:
-            ret = pvPortMalloc(sizeof(SPI_HANDLE));
+            ret = pvPortMalloc(sizeof(SPIHandle_t));
             ret->CON = (CONBITS_t *) &SPI5CON;
             ret->CON2 = (CON2BITS_t *) &SPI5CON2;
             ret->STAT = &SPI5STAT;
@@ -109,7 +109,7 @@ SPI_HANDLE * SPI_createHandle(uint8_t module){
             
 #ifdef SPI6CON
         case 6:
-            ret = pvPortMalloc(sizeof(SPI_HANDLE));
+            ret = pvPortMalloc(sizeof(SPIHandle_t));
             ret->CON = (CONBITS_t *) &SPI6CON;
             ret->CON2 = (CON2BITS_t *) &SPI6CON2;
             ret->STAT = &SPI6STAT;
@@ -127,12 +127,12 @@ SPI_HANDLE * SPI_createHandle(uint8_t module){
     return 0;
 }
 
-void SPI_setCustomPinConfig(SPI_HANDLE * handle, uint32_t SDIEnabled, uint32_t SDOEnabled){
+void SPI_setCustomPinConfig(SPIHandle_t * handle, uint32_t SDIEnabled, uint32_t SDOEnabled){
     SPICONbits.DISSDI = !SDIEnabled;
     SPICONbits.DISSDO = !SDOEnabled;
 }
 
-void SPI_init(SPI_HANDLE * handle, volatile uint32_t* SDOPin, uint8_t SDIPin, uint8_t spiMode, uint32_t clkFreq){
+void SPI_init(SPIHandle_t * handle, volatile uint32_t* SDOPin, uint8_t SDIPin, uint8_t spiMode, uint32_t clkFreq){
     SPICONbits.FRMEN = 0;
     SPICONbits.MSSEN = 0;
     SPICONbits.MCLKSEL = 0;
@@ -194,7 +194,7 @@ void SPI_init(SPI_HANDLE * handle, volatile uint32_t* SDOPin, uint8_t SDIPin, ui
 }
 
 static void SPI_DMAISR(uint32_t evt, void * data){
-    SPI_HANDLE * handle = (SPI_HANDLE *) data;
+    SPIHandle_t * handle = (SPIHandle_t *) data;
     
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
     
@@ -202,7 +202,7 @@ static void SPI_DMAISR(uint32_t evt, void * data){
     xSemaphoreGiveFromISR(handle->semaphore, &xHigherPriorityTaskWoken);
 }
 
-uint32_t SPI_setDMAEnabled(SPI_HANDLE * handle, uint32_t ena){
+uint32_t SPI_setDMAEnabled(SPIHandle_t * handle, uint32_t ena){
     //do we need to change anything?
     if(ena && handle->dmaEnabled) return 1;
     if(!ena && !handle->dmaEnabled) return 1;
@@ -242,17 +242,17 @@ uint32_t SPI_setDMAEnabled(SPI_HANDLE * handle, uint32_t ena){
     handle->dmaEnabled = ena;
 }
 
-void SPI_setBufferConfig(SPI_HANDLE * handle, uint32_t eBufferEna){
+void SPI_setBufferConfig(SPIHandle_t * handle, uint32_t eBufferEna){
     SPICONbits.ENHBUF = eBufferEna;
 }
 
-void SPI_setIRQConfig(SPI_HANDLE * handle, uint32_t txIRQMode, uint32_t rxIRQMode){
+void SPI_setIRQConfig(SPIHandle_t * handle, uint32_t txIRQMode, uint32_t rxIRQMode){
     SPICON &= ~(_SPI1CON_STXISEL_MASK | _SPI1CON_SRXISEL_MASK);
     SPICON |= txIRQMode << _SPI1CON_STXISEL_POSITION;
     SPICON |= rxIRQMode << _SPI1CON_SRXISEL_POSITION;
 }
 
-uint8_t SPI_send(SPI_HANDLE * handle, uint8_t data){
+uint8_t SPI_send(SPIHandle_t * handle, uint8_t data){
     SPIBUF = data;
 
     while(SPISTAT & _SPI2STAT_SPIBUSY_MASK);// UART_print("return 0x%08x\r\n", SPISTAT);
@@ -260,11 +260,11 @@ uint8_t SPI_send(SPI_HANDLE * handle, uint8_t data){
     return ret;
 }
 
-void SPI_flush(SPI_HANDLE * handle){
+void SPI_flush(SPIHandle_t * handle){
     while(!(SPISTAT & _SPI1STAT_SPIRBE_MASK));
 }
 
-void SPI_continueDMARead(SPI_HANDLE * handle, uint8_t * data, uint32_t length, unsigned WE, unsigned dummyEnable){
+void SPI_continueDMARead(SPIHandle_t * handle, uint8_t * data, uint32_t length, unsigned WE, unsigned dummyEnable){
     
     //reset pointers and irq sources
     DMA_abortTransfer(handle->rxDMA);
@@ -289,7 +289,7 @@ void SPI_continueDMARead(SPI_HANDLE * handle, uint8_t * data, uint32_t length, u
     DMA_setEnabled(handle->txDMA, 1);
 }
 
-void SPI_sendBytes(SPI_HANDLE * handle, uint8_t * data, uint32_t length, unsigned WE, unsigned dummyEnable, DMAIRQHandler_t customIRQHandlerFunction, void * customIRQHandlerData){
+void SPI_sendBytes(SPIHandle_t * handle, uint8_t * data, uint32_t length, unsigned WE, unsigned dummyEnable, DMAIRQHandler_t customIRQHandlerFunction, void * customIRQHandlerData){
     //if(!xSemaphoreTake(handle->semaphore, 1000)) return 0;
     //will we use DMA for the transfer?
     
@@ -347,20 +347,20 @@ void SPI_sendBytes(SPI_HANDLE * handle, uint8_t * data, uint32_t length, unsigne
     //xSemaphoreGive(handle->semaphore);
 }
 
-void SPI_readBytes(SPI_HANDLE * handle, uint8_t * data, uint16_t length){
+void SPI_readBytes(SPIHandle_t * handle, uint8_t * data, uint16_t length){
     uint16_t i = 0;
     for(;i < length; i++) data[i] = SPI_send(handle, 0xff);
 }
 
-void SPI_setCLKFreq(SPI_HANDLE * handle, uint32_t freq){
+void SPI_setCLKFreq(SPIHandle_t * handle, uint32_t freq){
     if(freq > configPERIPHERAL_CLOCK_HZ/2) freq = configPERIPHERAL_CLOCK_HZ/2;
     SPIBRG = (configPERIPHERAL_CLOCK_HZ/(2*freq)) - 1;
 }
 
-void SPI_setCLKDiv(SPI_HANDLE * handle, uint32_t div){
+void SPI_setCLKDiv(SPIHandle_t * handle, uint32_t div){
     SPIBRG = div;
 }
 
-uint32_t SPI_getCLKDiv(SPI_HANDLE * handle){
+uint32_t SPI_getCLKDiv(SPIHandle_t * handle){
     return SPIBRG;
 }

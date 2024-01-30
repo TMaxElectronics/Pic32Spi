@@ -109,21 +109,21 @@ typedef struct{
     DMA_HANDLE_t      * txDMA;
     DMA_HANDLE_t      * rxDMA;
     uint32_t            dmaEnabled;
-} SPI_HANDLE;
+} SPIHandle_t;
 
-SPI_HANDLE * SPI_createHandle(uint8_t module);
-void SPI_setCustomPinConfig(SPI_HANDLE * handle, uint32_t SDIEnabled, uint32_t SDOEnabled);
-void SPI_init(SPI_HANDLE * handle, volatile uint32_t* SDOPin, uint8_t SDIPin, uint8_t spiMode, uint32_t clkFreq);
-uint32_t SPI_setDMAEnabled(SPI_HANDLE * handle, uint32_t ena);
-void SPI_setBufferConfig(SPI_HANDLE * handle, uint32_t eBufferEna);
-void SPI_setIRQConfig(SPI_HANDLE * handle, uint32_t txIRQMode, uint32_t rxIRQMode);
-uint8_t SPI_send(SPI_HANDLE * handle, uint8_t data);
-void SPI_continueDMARead(SPI_HANDLE * handle, uint8_t * data, uint32_t length, unsigned WE, unsigned dummyEnable);
-void SPI_flush(SPI_HANDLE * handle);
-void SPI_sendBytes(SPI_HANDLE * handle, uint8_t * data, uint32_t length, unsigned WE, unsigned dummyEnable, DMAIRQHandler_t customIRQHandlerFunction, void * customIRQHandlerData);
-void SPI_readBytes(SPI_HANDLE * handle, uint8_t * data, uint16_t length);
-void SPI_setCLKFreq(SPI_HANDLE * handle, uint32_t freq);
-void SPI_setCLKDiv(SPI_HANDLE * handle, uint32_t div);
-uint32_t SPI_getCLKDiv(SPI_HANDLE * handle);
+SPIHandle_t * SPI_createHandle(uint8_t module);
+void SPI_setCustomPinConfig(SPIHandle_t * handle, uint32_t SDIEnabled, uint32_t SDOEnabled);
+void SPI_init(SPIHandle_t * handle, volatile uint32_t* SDOPin, uint8_t SDIPin, uint8_t spiMode, uint32_t clkFreq);
+uint32_t SPI_setDMAEnabled(SPIHandle_t * handle, uint32_t ena);
+void SPI_setBufferConfig(SPIHandle_t * handle, uint32_t eBufferEna);
+void SPI_setIRQConfig(SPIHandle_t * handle, uint32_t txIRQMode, uint32_t rxIRQMode);
+uint8_t SPI_send(SPIHandle_t * handle, uint8_t data);
+void SPI_continueDMARead(SPIHandle_t * handle, uint8_t * data, uint32_t length, unsigned WE, unsigned dummyEnable);
+void SPI_flush(SPIHandle_t * handle);
+void SPI_sendBytes(SPIHandle_t * handle, uint8_t * data, uint32_t length, unsigned WE, unsigned dummyEnable, DMAIRQHandler_t customIRQHandlerFunction, void * customIRQHandlerData);
+void SPI_readBytes(SPIHandle_t * handle, uint8_t * data, uint16_t length);
+void SPI_setCLKFreq(SPIHandle_t * handle, uint32_t freq);
+void SPI_setCLKDiv(SPIHandle_t * handle, uint32_t div);
+uint32_t SPI_getCLKDiv(SPIHandle_t * handle);
 
 #endif
