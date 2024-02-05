@@ -37,6 +37,8 @@ void                    SPIDevice_setClockspeed(SPIDeviceHandle_t * handle, uint
 
 uint32_t                SPIDevice_select(SPIDeviceHandle_t * handle, uint32_t timeout);
 uint32_t                SPIDevice_deselect(SPIDeviceHandle_t * handle);
+uint32_t                SPIDevice_quickSelect(SPIDeviceHandle_t * handle);
+uint32_t                SPIDevice_quickDeSelect(SPIDeviceHandle_t * handle);
 
 #define SPIDevice_sendBytes(deviceHandle, data, length, WE, dummyEnable, customIRQHandlerFunction, customIRQHandlerData)    SPI_sendBytes(deviceHandle->spiHandle, data, length, WE, dummyEnable, customIRQHandlerFunction, customIRQHandlerData)
 #define SPIDevice_readBytes(deviceHandle, data, length)                                                                     SPI_readBytes(deviceHandle->spiHandle, data, length)

@@ -202,6 +202,8 @@ void SPI_continueDMARead(SPIHandle_t * handle, uint8_t * data, uint32_t length, 
     DMA_setEnabled(handle->txDMA, 1);
 }
 
+#pragma GCC push_options
+#pragma GCC optimize ("Os")
 void SPI_sendBytes(SPIHandle_t * handle, uint8_t * data, uint32_t length, unsigned WE, unsigned dummyEnable, DMAIRQHandler_t customIRQHandlerFunction, void * customIRQHandlerData){
     //will we use DMA for the transfer?
     if(handle->dmaEnabled){
@@ -250,12 +252,23 @@ void SPI_sendBytes(SPIHandle_t * handle, uint8_t * data, uint32_t length, unsign
         //wait for the buffer to be emptied
         while(SPISTAT & _SPI2STAT_SPIBUSY_MASK);
     }else{
-        for(uint32_t i = 0;i < length; i++){
-            uint8_t trash = SPI_send(handle, dummyEnable ? 0xff : data[i]);
-            if(WE) data[i] = trash;
+        uint8_t trash = 0;
+        if(dummyEnable){
+            for(uint32_t i = 0;i < length; i++){
+                SPIBUF = 0xff;
+                while(SPISTAT & _SPI2STAT_SPIBUSY_MASK);// UART_print("return 0x%08x\r\n", SPISTAT);
+                if(WE) data[i] = SPIBUF;
+            }
+        }else{
+            for(uint32_t i = 0;i < length; i++){
+                SPIBUF = data[i];
+                while(SPISTAT & _SPI2STAT_SPIBUSY_MASK);// UART_print("return 0x%08x\r\n", SPISTAT);
+                if(WE) data[i] = SPIBUF;
+            }
         }
     }
 }
+#pragma GCC pop_options
 
 void SPI_readBytes(SPIHandle_t * handle, uint8_t * data, uint16_t length){
     uint16_t i = 0;
@@ -281,6 +294,8 @@ SPIDeviceHandle_t * SPIDevice_create(SPIHandle_t * handle, volatile uint32_t * c
     
     //did we actually get some memory?
     if(ret == NULL) return NULL;
+    
+    memset(ret, 0, sizeof(SPIDeviceHandle_t));
     
     //assign values
     ret->spiHandle      = handle;
@@ -325,6 +340,24 @@ void SPIDevice_setClockspeed(SPIDeviceHandle_t * handle, uint32_t speed){
     }
 }
 
+uint32_t SPIDevice_quickSelect(SPIDeviceHandle_t * handle){
+    //just assert the cs pin, do nothing else. This function requires call of SPIDevice_select first
+    if(handle->csActiveLevel){
+        SPI_setCS(handle);
+    }else{
+        SPI_clearCS(handle);
+    }
+}
+
+uint32_t SPIDevice_quickDeSelect(SPIDeviceHandle_t * handle){
+    //just de-assert the cs pin, do nothing else. This function requires call of SPIDevice_select for proper ending of a transfer
+    if(handle->csActiveLevel){        
+        SPI_clearCS(handle);
+    }else{
+        SPI_setCS(handle);
+    }
+}
+
 uint32_t SPIDevice_select(SPIDeviceHandle_t * handle, uint32_t timeout){
     if(handle == NULL) return;
     
@@ -339,7 +372,7 @@ uint32_t SPIDevice_select(SPIDeviceHandle_t * handle, uint32_t timeout){
     
     //we are now in total control of the spi module (evil smiley). Set it up the way the device wants it
     SPI_setDMAEnabled(handle->spiHandle, handle->dmaEnabled);
-    SPI_setCLKFreq(handle->spiHandle, handle->deviceClockspeed);
+    if(handle->deviceClockspeed != 0) SPI_setCLKFreq(handle->spiHandle, handle->deviceClockspeed);
     
     //and finally assert the chipselect
     if(handle->csActiveLevel){
@@ -358,7 +391,7 @@ uint32_t SPIDevice_deselect(SPIDeviceHandle_t * handle){
     }
     
     //yes it is, make sure we return the semaphore
-    xSemaphoreGive(handle);
+    xSemaphoreGive(handle->spiHandle->semaphore);
     
     //and de-assert the chipselect
     if(handle->csActiveLevel){        
